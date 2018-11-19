@@ -8,9 +8,10 @@ enum Mode {
     Trim = 2,
     Extract = 3,
 }
-const RES_BUFFER_SIZE: usize = 2_000_000;
+const RES_BUFFER_SIZE: usize = 4_000_000;
 const LOCAL_WORK_SIZE: u32 = 256;
 const GLOBAL_WORK_SIZE: u32 = 1024 * LOCAL_WORK_SIZE;
+const INPUT_SIZE: usize = 1024 * 1024 * 512 / 32;
 
 const TRIMS: u32 = 60;
 
@@ -59,8 +60,6 @@ fn main() -> ocl::Result<()> {
     println!("Device selected: {}", device.to_string());
 
     let edge_bits = 29;
-    let edge_count = 1 << edge_bits;
-    let node_count = edge_count * 2;
     let res_buf = vec![0; RES_BUFFER_SIZE];
 
     let mut prog_builder = ProgramBuilder::new();
@@ -73,13 +72,13 @@ fn main() -> ocl::Result<()> {
         .build()?;
 
     let edges = pro_que
-        .buffer_builder::<u8>()
-        .len(edge_count)
+        .buffer_builder::<u32>()
+        .len(INPUT_SIZE)
         .fill_val(0xFF)
         .build()?;
     let counters = pro_que
         .buffer_builder::<u32>()
-        .len(node_count)
+        .len(INPUT_SIZE)
         .fill_val(0)
         .build()?;
 
