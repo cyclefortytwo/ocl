@@ -44,7 +44,7 @@ u64 dipnode(ulong v0i, ulong v1i, ulong v2i, ulong v3i, u64 nce, uint uorv) {
 // 1024 thread blocks, 256 threads each, 256 edges for each thread
 // 8*1024*256*256 = 536 870 912 edges = cuckatoo29
 __attribute__((reqd_work_group_size(256, 1, 1)))
-__kernel  void LeanRound(const u64 v0i, const u64 v1i, const u64 v2i, const u64 v3i, __global uint8 * edges, __global uint * counters, __global uint * aux, const int mode, const int uorv)
+__kernel  void LeanRound(const u64 v0i, const u64 v1i, const u64 v2i, const u64 v3i, __global uint8 * edges, __global uint * counters, __global int * aux, const int mode, const uint uorv)
 {
 	const int blocks = NEDGES / 32;
 	const int gid = get_global_id(0);

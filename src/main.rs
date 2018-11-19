@@ -1,9 +1,7 @@
 //extern crate ocl;
 use ocl::builders::ProgramBuilder;
-use ocl::error::ErrorKind;
 use ocl::{Device, Platform, ProQue, SpatialDims};
 use std::env;
-use std::process::exit;
 
 enum Mode {
     SetCnt = 1,
@@ -14,7 +12,7 @@ const RES_BUFFER_SIZE: usize = 2_000_000;
 const LOCAL_WORK_SIZE: u32 = 256;
 const GLOBAL_WORK_SIZE: u32 = 1024 * LOCAL_WORK_SIZE;
 
-const TRIMS: i32 = 60;
+const TRIMS: u32 = 60;
 
 fn find_paltform(selector: Option<&String>) -> Option<Platform> {
     match selector {
@@ -104,11 +102,10 @@ fn main() -> ocl::Result<()> {
     let local_work_size = 256;
     let global_work_size = 1024 * local_work_size;
     let mut current_mode = Mode::SetCnt;
-    let mut current_uorv: i32 = 0;
+    let mut current_uorv: u32 = 0;
 
     let mut kernel = pro_que
         .kernel_builder("LeanRound")
-        .global_work_size(SpatialDims::One(global_work_size))
         .local_work_size(SpatialDims::One(local_work_size))
         .arg(k0)
         .arg(k1)
@@ -124,16 +121,11 @@ fn main() -> ocl::Result<()> {
     // CUCKATOO 29 ONLY at this time, otherwise universal !!!
     //let logsize: u32 = 29; // this needs to be passed to kernel as well AND loops below updated
     //let edges = 1 << logsize;
-    for l in 0..TRIMS {
-        current_uorv = l & 1 as i32;
-        let mut offset;
-        counters.cmd().fill(0, None).enq()?;
-        current_mode = Mode::SetCnt;
+    let mut offset;
 
-        kernel.set_arg(7, current_mode as i32)?;
-        kernel.set_arg(8, current_uorv)?;
-
-        for i in 0..8 {
+    macro_rules! kernel_enq (
+        ($num:expr) => (
+        for i in 0..$num {
             offset = i * global_work_size;
             unsafe {
                 kernel
@@ -141,19 +133,25 @@ fn main() -> ocl::Result<()> {
                     .enq()?;
             }
         }
+        ));
+
+    for l in 0..TRIMS {
+        current_uorv = l & 1 as u32;
+        current_mode = Mode::SetCnt;
+        kernel.set_arg(7, current_mode as u32)?;
+        kernel.set_arg(8, current_uorv)?;
+        kernel_enq!(8);
+
         current_mode = if l == (TRIMS - 1) {
             Mode::Extract
         } else {
             Mode::Trim
         };
-        kernel.set_arg(7, current_mode as i32)?;
-        for i in 0..8 {
-            offset = i * global_work_size;
-            unsafe {
-                kernel
-                    .set_default_global_work_offset(SpatialDims::One(offset))
-                    .enq()?;
-            }
+        kernel.set_arg(7, current_mode as u32)?;
+        kernel_enq!(8);
+        // prepare for the next round
+        if l != TRIMS - 1 {
+            counters.cmd().fill(0, None).enq()?;
         }
     }
     unsafe {
