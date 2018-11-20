@@ -59,8 +59,8 @@ fn main() -> ocl::Result<()> {
     println!("Device selected: {}", device.to_string());
 
     let edge_bits = 29;
-    let edge_count = 1 << edge_bits;
-    let node_count = edge_count * 2;
+    let edge_count = 1024 * 1024 * 512 / 8; //1 << edge_bits;
+    let node_count = 1024 * 1024 * 512 / 32; //edge_count * 2;
     let res_buf = vec![0; RES_BUFFER_SIZE];
 
     let mut prog_builder = ProgramBuilder::new();
