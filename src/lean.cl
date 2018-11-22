@@ -131,7 +131,7 @@ __kernel  void LeanRound(const u64 v0i, const u64 v1i, const u64 v2i, const u64 
 							// position in output array as multiple of 128bits (32bits will be empty)
 							int auxIndex = 4 + (edgePos * 4);
 							// debug failsafe
-							if (!(DEBUG && (auxIndex > (1024 * 1024))))
+							//if (!(DEBUG && (auxIndex > (1024 * 1024))))
 							{
 								// store all information to global memory
 								aux[auxIndex + 0] = dipnode(v0i, v1i, v2i, v3i, nonce, 0);
