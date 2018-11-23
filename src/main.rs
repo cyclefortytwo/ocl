@@ -204,6 +204,23 @@ impl Search {
         }
     }
 
+    #[inline]
+    pub fn visit(&mut self, node: u32) {
+        self.visited.insert(node);
+        self.path.push(node);
+    }
+
+    #[inline]
+    pub fn leave(&mut self) {
+        self.path.pop();
+    }
+
+    #[inline]
+    pub fn is_visited(&self, node: u32) -> bool {
+        self.visited.contains(&node)
+    }
+
+    #[inline]
     fn clear(&mut self) {
         self.path.clear();
     }
@@ -266,20 +283,18 @@ impl Graph {
     }
 
     fn walk_graph(&self, current: u32, search: &mut Search) -> Option<Vec<u32>> {
-        search.visited.insert(current);
-        search.path.push(current);
+        search.visit(current);
         let neighbors = match self.neighbors(current) {
             None => return None,
             Some(ns) => ns,
         };
         for ns in neighbors {
-            if !search.visited.contains(&ns) {
-                search.path.push(*ns);
-                search.visited.insert(*ns);
+            if !search.is_visited(*ns) {
+                search.visit(*ns);
                 if let Some(c) = self.walk_graph(*ns ^ 1, search) {
                     return Some(c);
                 }
-                search.path.pop();
+                search.leave();
             } else {
                 if search.is_cycle(*ns) {
                     println!("Found");
@@ -287,7 +302,7 @@ impl Graph {
                 }
             }
         }
-        search.path.pop();
+        search.leave();
         None
     }
 }
