@@ -177,7 +177,7 @@ fn main() -> ocl::Result<()> {
     let g = Graph::build(&res_buf);
     let m4 = SystemTime::now();
     println!("Building graph {:?}", m4.duration_since(m3).unwrap());
-    println!("Number of nodes {}", g.lists.len());
+    println!("Number of nodes {}", g.node_count());
 
     let m5 = SystemTime::now();
     let cycle = g.find();
@@ -238,8 +238,56 @@ impl Search {
     }
 }
 
+struct AdjNode {
+    value: u32,
+    next: Option<usize>,
+}
+
+impl AdjNode {
+    fn first(value: u32) -> AdjNode {
+        AdjNode { value, next: None }
+    }
+
+    fn next(value: u32, next: usize) -> AdjNode {
+        AdjNode {
+            value,
+            next: Some(next),
+        }
+    }
+}
+
+struct AdjList<'a> {
+    current: Option<&'a AdjNode>,
+    adj_store: &'a Vec<AdjNode>,
+}
+
+impl<'a> AdjList<'a> {
+    pub fn new(current: Option<&'a AdjNode>, adj_store: &'a Vec<AdjNode>) -> AdjList<'a> {
+        AdjList { current, adj_store }
+    }
+}
+
+impl<'a> Iterator for AdjList<'a> {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &self.current {
+            None => None,
+            Some(node) => {
+                let val = node.value;
+                match node.next {
+                    None => self.current = None,
+                    Some(next_index) => self.current = Some(&self.adj_store[next_index]),
+                }
+                Some(val)
+            }
+        }
+    }
+}
+
 struct Graph {
-    lists: FnvHashMap<u32, Vec<u32>>,
+    adj_index: FnvHashMap<u32, usize>,
+    adj_store: Vec<AdjNode>,
     nonces: FnvHashMap<(u32, u32), u32>,
 }
 
@@ -247,32 +295,60 @@ impl Graph {
     pub fn build(edges: &[u32]) -> Graph {
         let edge_count = edges[1] as usize;
         let mut g = Graph {
-            lists: FnvHashMap::with_capacity_and_hasher(edge_count, Default::default()),
+            adj_index: FnvHashMap::with_capacity_and_hasher(edge_count * 2, Default::default()),
             nonces: FnvHashMap::with_capacity_and_hasher(edge_count, Default::default()),
+            adj_store: Vec::with_capacity(edge_count * 2),
         };
         const STEP: usize = 4;
         for i in 1..=edge_count {
             let n1 = edges[i * STEP];
             let n2 = edges[i * STEP + 1];
             let nonce = edges[i * STEP + 2];
-            g.lists.entry(n1).or_insert(Vec::new()).push(n2);
-            g.lists.entry(n2).or_insert(Vec::new()).push(n1);
+            g.add_edge(n1, n2);
             g.nonces.insert((n1, n2), nonce);
         }
         g
     }
+
+    fn edge_count(&self) -> usize {
+        self.nonces.len()
+    }
+
+    fn node_count(&self) -> usize {
+        self.adj_index.len()
+    }
+
+    fn add_edge(&mut self, node1: u32, node2: u32) {
+        self.add_half_edge(node1, node2);
+        self.add_half_edge(node2, node1);
+    }
+
+    fn add_half_edge(&mut self, from: u32, to: u32) {
+        if let Some(index) = self.adj_index.get_mut(&from) {
+            self.adj_store.push(AdjNode::next(to, *index));
+            *index = self.adj_store.len() - 1;
+        } else {
+            self.adj_store.push(AdjNode::first(to));
+            self.adj_index.insert(from, self.adj_store.len() - 1);
+        }
+    }
+
     #[inline]
-    fn neighbors(&self, node: u32) -> Option<&Vec<u32>> {
-        self.lists.get(&node)
+    fn neighbors(&self, node: u32) -> impl Iterator<Item = u32> + '_ {
+        let node = match self.adj_index.get(&node) {
+            Some(index) => Some(&self.adj_store[*index]),
+            None => None,
+        };
+        AdjList::new(node, &self.adj_store)
     }
 
     #[inline]
     fn nodes(&self) -> impl Iterator<Item = &u32> {
-        self.lists.keys()
+        self.adj_index.keys()
     }
 
     pub fn find(&self) -> Option<Vec<u32>> {
-        let mut search = Search::new(self.lists.len());
+        let mut search = Search::new(self.node_count());
         for node in self.nodes() {
             if let Some(c) = self.walk_graph(*node, &mut search) {
                 return Some(c);
@@ -283,20 +359,19 @@ impl Graph {
     }
 
     fn walk_graph(&self, current: u32, search: &mut Search) -> Option<Vec<u32>> {
+        if search.is_visited(current) {
+            return None;
+        }
         search.visit(current);
-        let neighbors = match self.neighbors(current) {
-            None => return None,
-            Some(ns) => ns,
-        };
-        for ns in neighbors {
-            if !search.is_visited(*ns) {
-                search.visit(*ns);
-                if let Some(c) = self.walk_graph(*ns ^ 1, search) {
+        for ns in self.neighbors(current) {
+            if !search.is_visited(ns) {
+                search.visit(ns);
+                if let Some(c) = self.walk_graph(ns ^ 1, search) {
                     return Some(c);
                 }
                 search.leave();
             } else {
-                if search.is_cycle(*ns) {
+                if search.is_cycle(ns) {
                     println!("Found");
                     return Some(search.path.clone());
                 }
