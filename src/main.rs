@@ -194,6 +194,7 @@ use fnv::{FnvHashMap, FnvHashSet};
 struct Search {
     path: Vec<u32>,
     visited: FnvHashSet<u32>,
+    node_visited: usize,
 }
 
 impl Search {
@@ -201,12 +202,19 @@ impl Search {
         Search {
             path: Vec::with_capacity(node_count),
             visited: FnvHashSet::with_capacity_and_hasher(node_count, Default::default()),
+            node_visited: 0,
         }
     }
 
     #[inline]
     pub fn visit(&mut self, node: u32) {
         self.visited.insert(node);
+        self.path.push(node);
+        self.node_visited += 1;
+    }
+
+    #[inline]
+    pub fn add(&mut self, node: u32) {
         self.path.push(node);
     }
 
@@ -244,10 +252,12 @@ struct AdjNode {
 }
 
 impl AdjNode {
+    #[inline]
     fn first(value: u32) -> AdjNode {
         AdjNode { value, next: None }
     }
 
+    #[inline]
     fn next(value: u32, next: usize) -> AdjNode {
         AdjNode {
             value,
@@ -262,6 +272,7 @@ struct AdjList<'a> {
 }
 
 impl<'a> AdjList<'a> {
+    #[inline]
     pub fn new(current: Option<&'a AdjNode>, adj_store: &'a Vec<AdjNode>) -> AdjList<'a> {
         AdjList { current, adj_store }
     }
@@ -310,14 +321,12 @@ impl Graph {
         g
     }
 
-    fn edge_count(&self) -> usize {
-        self.nonces.len()
-    }
-
+    #[inline]
     fn node_count(&self) -> usize {
         self.adj_index.len()
     }
 
+    #[inline]
     fn add_edge(&mut self, node1: u32, node2: u32) {
         self.add_half_edge(node1, node2);
         self.add_half_edge(node2, node1);
@@ -333,7 +342,6 @@ impl Graph {
         }
     }
 
-    #[inline]
     fn neighbors(&self, node: u32) -> impl Iterator<Item = u32> + '_ {
         let node = match self.adj_index.get(&node) {
             Some(index) => Some(&self.adj_store[*index]),
@@ -355,6 +363,7 @@ impl Graph {
             }
             search.clear();
         }
+        println!("Visted nodes: {}", search.node_visited);
         None
     }
 
@@ -365,6 +374,7 @@ impl Graph {
         search.visit(current);
         for ns in self.neighbors(current) {
             if !search.is_visited(ns) {
+                //search.add(ns);
                 search.visit(ns);
                 if let Some(c) = self.walk_graph(ns ^ 1, search) {
                     return Some(c);
