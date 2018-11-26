@@ -6,4 +6,6 @@ edition = "2018"
 
 [dependencies]
 ocl = "0.19"
-fnv = "1.0.3"
+#fnv = "1.0.3"
+int_hash = "0.1.1"
+byteorder = "1"

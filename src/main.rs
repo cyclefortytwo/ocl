@@ -18,7 +18,7 @@ fn find_paltform(selector: Option<&String>) -> Option<Platform> {
     match selector {
         None => Some(Platform::default()),
         Some(sel) => Platform::list().into_iter().find(|p| {
-            if let Ok(vendor) = p.vendor() {
+            if let Ok(vendor) = p.name() {
                 vendor.contains(sel)
             } else {
                 false
@@ -104,10 +104,15 @@ fn main() -> ocl::Result<()> {
     //let k2: u64 = 0x9a22f05e3bffed5e;
     //let k3: u64 = 0xb8d55478fa3a606d;
 
-    let k0: u64 = 0x5c0348cfc71b5ce6;
-    let k1: u64 = 0xbf4141b92a45e49;
-    let k2: u64 = 0x7282d7893f658b88;
-    let k3: u64 = 0x61525294db9b617f;
+    //let k0: u64 = 0x5c0348cfc71b5ce6;
+    //let k1: u64 = 0xbf4141b92a45e49;
+    //let k2: u64 = 0x7282d7893f658b88;
+    //let k3: u64 = 0x61525294db9b617f;
+
+    let k0: u64 = 0x27580576fe290177;
+    let k1: u64 = 0xf9ea9b2031f4e76e;
+    let k2: u64 = 0x1663308c8607868f;
+    let k3: u64 = 0xb88839b0fa180d0e;
 
     let local_work_size = 256;
     let global_work_size = 1024 * local_work_size;
@@ -177,45 +182,67 @@ fn main() -> ocl::Result<()> {
     let g = Graph::build(&res_buf);
     let m4 = SystemTime::now();
     println!("Building graph {:?}", m4.duration_since(m3).unwrap());
-    println!("Number of nodes {}", g.node_count());
+    println!(
+        "Number of nodes {}, edges {}",
+        g.node_count(),
+        g.edge_count()
+    );
 
     let m5 = SystemTime::now();
-    let cycle = g.find();
+    let _cycle = g.find()?;
     let m6 = SystemTime::now();
     println!("Searching graph {:?}", m6.duration_since(m5).unwrap());
-    if let Some(cycle) = cycle {
-        println!("Cycle {}: {:?}", cycle.len(), cycle);
-    }
     Ok(())
 }
 
-use fnv::{FnvHashMap, FnvHashSet};
+//use fnv::IntHashMap;
+use int_hash::IntHashMap;
+
+struct Solution {
+    nonces: Vec<u32>,
+}
 
 struct Search {
+    length: usize,
     path: Vec<u32>,
-    visited: FnvHashSet<u32>,
+    solutions: Vec<Solution>,
+
+    state: IntHashMap<u32, NodeState>,
     node_visited: usize,
+    node_explored: usize,
+}
+
+#[derive(Clone, Copy)]
+enum NodeState {
+    NotVisited,
+    Visited,
+    Explored,
 }
 
 impl Search {
-    pub fn new(node_count: usize) -> Search {
+    pub fn new(node_count: usize, length: usize) -> Search {
         Search {
             path: Vec::with_capacity(node_count),
-            visited: FnvHashSet::with_capacity_and_hasher(node_count, Default::default()),
+            solutions: vec![],
+            length: length * 2,
+            state: IntHashMap::with_capacity_and_hasher(node_count, Default::default()),
             node_visited: 0,
+            node_explored: 0,
         }
     }
 
     #[inline]
     pub fn visit(&mut self, node: u32) {
-        self.visited.insert(node);
+        self.state.insert(node, NodeState::Visited);
         self.path.push(node);
         self.node_visited += 1;
     }
 
     #[inline]
-    pub fn add(&mut self, node: u32) {
+    pub fn explore(&mut self, node: u32) {
+        self.state.insert(node, NodeState::Explored);
         self.path.push(node);
+        self.node_explored += 1;
     }
 
     #[inline]
@@ -224,25 +251,50 @@ impl Search {
     }
 
     #[inline]
+    pub fn state(&self, node: u32) -> NodeState {
+        match self.state.get(&node) {
+            None => NodeState::NotVisited,
+            Some(state) => *state,
+        }
+    }
+
+    #[inline]
     pub fn is_visited(&self, node: u32) -> bool {
-        self.visited.contains(&node)
+        match self.state(node) {
+            NodeState::NotVisited => false,
+            _ => true,
+        }
+    }
+
+    #[inline]
+    pub fn is_explored(&self, node: u32) -> bool {
+        match self.state(node) {
+            NodeState::Explored => true,
+            _ => false,
+        }
     }
 
     #[inline]
     fn clear(&mut self) {
         self.path.clear();
+        //self.state.clear();
     }
 
-    fn is_cycle(&self, node: u32) -> bool {
+    fn is_cycle(&mut self, node: u32) -> bool {
         //  TODO remove after tests
         if self.path.contains(&node) {
             let pos = self.path.iter().position(|&v| v == node).unwrap();
             let diff = (self.path.len() - pos) / 2;
             if diff > 1 {
-                println!("Found {}-cycle ", diff);
+                println!("Found {}-cycle {}", diff, node);
             }
         }
-        self.path.len() > 83 && self.path[self.path.len() - 84] == node
+        let res =
+            self.path.len() > self.length - 1 && self.path[self.path.len() - self.length] == node;
+        if res {
+            self.path.push(node);
+        }
+        res
     }
 }
 
@@ -296,18 +348,26 @@ impl<'a> Iterator for AdjList<'a> {
     }
 }
 
+fn nonce_key(node1: u32, node2: u32) -> (u32, u32) {
+    if node1 < node2 {
+        (node1, node2)
+    } else {
+        (node2, node1)
+    }
+}
+
 struct Graph {
-    adj_index: FnvHashMap<u32, usize>,
+    adj_index: IntHashMap<u32, usize>,
     adj_store: Vec<AdjNode>,
-    nonces: FnvHashMap<(u32, u32), u32>,
+    nonces: IntHashMap<(u32, u32), u32>,
 }
 
 impl Graph {
     pub fn build(edges: &[u32]) -> Graph {
         let edge_count = edges[1] as usize;
         let mut g = Graph {
-            adj_index: FnvHashMap::with_capacity_and_hasher(edge_count * 2, Default::default()),
-            nonces: FnvHashMap::with_capacity_and_hasher(edge_count, Default::default()),
+            adj_index: IntHashMap::with_capacity_and_hasher(edge_count * 2, Default::default()),
+            nonces: IntHashMap::with_capacity_and_hasher(edge_count, Default::default()),
             adj_store: Vec::with_capacity(edge_count * 2),
         };
         const STEP: usize = 4;
@@ -316,14 +376,26 @@ impl Graph {
             let n2 = edges[i * STEP + 1];
             let nonce = edges[i * STEP + 2];
             g.add_edge(n1, n2);
-            g.nonces.insert((n1, n2), nonce);
+            g.nonces.insert(nonce_key(n1, n2), nonce);
         }
         g
+    }
+
+    pub fn get_nonce(&self, node1: u32, node2: u32) -> Result<u32, String> {
+        match self.nonces.get(&nonce_key(node1, node2)) {
+            None => Err(format!("can not find  a nonce for {}:{}", node1, node2)),
+            Some(v) => Ok(*v),
+        }
     }
 
     #[inline]
     fn node_count(&self) -> usize {
         self.adj_index.len()
+    }
+
+    #[inline]
+    pub fn edge_count(&self) -> usize {
+        self.adj_store.len() / 2
     }
 
     #[inline]
@@ -342,12 +414,12 @@ impl Graph {
         }
     }
 
-    fn neighbors(&self, node: u32) -> impl Iterator<Item = u32> + '_ {
+    fn neighbors(&self, node: u32) -> Option<impl Iterator<Item = u32> + '_> {
         let node = match self.adj_index.get(&node) {
             Some(index) => Some(&self.adj_store[*index]),
-            None => None,
+            None => return None,
         };
-        AdjList::new(node, &self.adj_store)
+        Some(AdjList::new(node, &self.adj_store))
     }
 
     #[inline]
@@ -355,39 +427,67 @@ impl Graph {
         self.adj_index.keys()
     }
 
-    pub fn find(&self) -> Option<Vec<u32>> {
-        let mut search = Search::new(self.node_count());
+    pub fn find(&self) -> Result<(), String> {
+        let mut search = Search::new(self.node_count(), 42);
         for node in self.nodes() {
-            if let Some(c) = self.walk_graph(*node, &mut search) {
-                return Some(c);
-            }
+            self.walk_graph(*node, &mut search)?;
             search.clear();
         }
-        println!("Visted nodes: {}", search.node_visited);
-        None
+        println!("Explored nodes: {}", search.node_explored);
+        println!("Found cycles: {}", search.solutions.len());
+        for sol in search.solutions {
+            println!("Solution: {:x?}", sol.nonces);
+        }
+        Ok(())
     }
 
-    fn walk_graph(&self, current: u32, search: &mut Search) -> Option<Vec<u32>> {
-        if search.is_visited(current) {
-            return None;
+    fn add_solution(&self, s: &mut Search) -> Result<(), String> {
+        let res: Result<Vec<_>, _> = s.path[s.path.len() - s.length..]
+            .chunks(2)
+            .map(|pair| match pair {
+                &[n1, n2] => self.get_nonce(n1, n2),
+                _ => Err("not an edge".to_string()),
+            })
+            .collect();
+        let mut nonces = match res {
+            Ok(v) => v,
+            Err(e) => {
+                return Err(format!("Failed to get nonce {:?}", e));
+            }
+        };
+        nonces.sort();
+        let sol = Solution { nonces };
+        s.solutions.push(sol);
+        Ok(())
+    }
+
+    fn walk_graph(&self, current: u32, search: &mut Search) -> Result<(), String> {
+        if search.is_explored(current) {
+            if search.is_cycle(current) {
+                self.add_solution(search)?;
+                println!("Found {}", current);
+            }
+            return Ok(());
         }
-        search.visit(current);
-        for ns in self.neighbors(current) {
+
+        let neighbors = match self.neighbors(current) {
+            None => return Ok(()),
+            Some(it) => it,
+        };
+        search.explore(current);
+        for ns in neighbors {
             if !search.is_visited(ns) {
-                //search.add(ns);
                 search.visit(ns);
-                if let Some(c) = self.walk_graph(ns ^ 1, search) {
-                    return Some(c);
-                }
+                //search.visit_edge();
+                self.walk_graph(ns ^ 1, search)?;
                 search.leave();
             } else {
                 if search.is_cycle(ns) {
-                    println!("Found");
-                    return Some(search.path.clone());
+                    self.add_solution(search)?;
                 }
             }
         }
         search.leave();
-        None
+        Ok(())
     }
 }
