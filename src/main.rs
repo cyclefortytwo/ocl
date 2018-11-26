@@ -1,3 +1,6 @@
+extern crate int_hash;
+extern crate ocl;
+
 use ocl::builders::ProgramBuilder;
 use ocl::{Device, Platform, ProQue, SpatialDims};
 use std::env;
@@ -334,7 +337,7 @@ impl<'a> Iterator for AdjList<'a> {
     type Item = u32;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match &self.current {
+        match self.current {
             None => None,
             Some(node) => {
                 let val = node.value;
@@ -405,13 +408,13 @@ impl Graph {
     }
 
     fn add_half_edge(&mut self, from: u32, to: u32) {
-        if let Some(index) = self.adj_index.get_mut(&from) {
+        if let Some(index) = self.adj_index.get(&from) {
             self.adj_store.push(AdjNode::next(to, *index));
-            *index = self.adj_store.len() - 1;
+        //*index = self.adj_store.len() - 1;
         } else {
             self.adj_store.push(AdjNode::first(to));
-            self.adj_index.insert(from, self.adj_store.len() - 1);
         }
+        self.adj_index.insert(from, self.adj_store.len() - 1);
     }
 
     fn neighbors(&self, node: u32) -> Option<impl Iterator<Item = u32> + '_> {
