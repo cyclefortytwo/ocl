@@ -1,8 +1,8 @@
 extern crate int_hash;
 extern crate ocl;
 
-use ocl::builders::ProgramBuilder;
-use ocl::{Device, Platform, ProQue, SpatialDims};
+use ocl::flags::CommandQueueProperties;
+use ocl::{Buffer, Context, Device, Kernel, Platform, Program, Queue, SpatialDims};
 use std::env;
 use std::time::SystemTime;
 
@@ -12,8 +12,8 @@ enum Mode {
     Extract = 3,
 }
 const RES_BUFFER_SIZE: usize = 4_000_000;
-const LOCAL_WORK_SIZE: u32 = 256;
-const GLOBAL_WORK_SIZE: u32 = 1024 * LOCAL_WORK_SIZE;
+const LOCAL_WORK_SIZE: usize = 256;
+const GLOBAL_WORK_SIZE: usize = 1024 * LOCAL_WORK_SIZE;
 
 const TRIMS: u32 = 128;
 
@@ -64,36 +64,38 @@ fn main() -> ocl::Result<()> {
     println!("Device selected: {}", device.to_string());
 
     let _edge_bits = 29;
-    let edge_count = 1024 * 1024 * 512 / 8;
+    let edge_count = 1024 * 1024 * 512 / 32;
     let node_count = 1024 * 1024 * 512 / 32;
     let res_buf: Vec<u32> = vec![0; RES_BUFFER_SIZE];
-
-    let mut prog_builder = ProgramBuilder::new();
-    prog_builder.source_file("./src/lean.cl");
 
     let m1 = SystemTime::now();
     println!("Preparing {:?}", m1.duration_since(start).unwrap());
 
-    let pro_que = ProQue::builder()
-        .prog_bldr(prog_builder)
-        .device(&device)
-        .dims(GLOBAL_WORK_SIZE)
+    let context = Context::builder()
+        .platform(platform)
+        .devices(device)
         .build()?;
 
-    let edges = pro_que
-        .buffer_builder::<u8>()
+    let qu = Queue::new(&context, device, Some(CommandQueueProperties::new()))?;
+
+    let prog = Program::builder()
+        .devices(device)
+        .source_file("./src/lean.cl")
+        .build(&context)?;
+
+    let edges = Buffer::<u32>::builder()
+        .queue(qu.clone())
         .len(edge_count)
-        .fill_val(0xFF)
+        .fill_val(0xFFFFFFFF)
         .build()?;
-    let counters = pro_que
-        .buffer_builder::<u32>()
+    let counters = Buffer::<u32>::builder()
+        .queue(qu.clone())
         .len(node_count)
         .fill_val(0)
         .build()?;
-
     let result = unsafe {
-        pro_que
-            .buffer_builder::<u32>()
+        Buffer::<u32>::builder()
+            .queue(qu.clone())
             .len(RES_BUFFER_SIZE)
             .fill_val(0)
             .use_host_slice(&res_buf[..])
@@ -117,14 +119,15 @@ fn main() -> ocl::Result<()> {
     let k2: u64 = 0x1663308c8607868f;
     let k3: u64 = 0xb88839b0fa180d0e;
 
-    let local_work_size = 256;
-    let global_work_size = 1024 * local_work_size;
     let mut current_mode = Mode::SetCnt;
     let mut current_uorv: u32 = 0;
 
-    let mut kernel = pro_que
-        .kernel_builder("LeanRound")
-        .local_work_size(SpatialDims::One(local_work_size))
+    let mut kernel = Kernel::builder()
+        .name("LeanRound")
+        .program(&prog)
+        .queue(qu.clone())
+        .global_work_size(GLOBAL_WORK_SIZE)
+        .local_work_size(SpatialDims::One(LOCAL_WORK_SIZE))
         .arg(k0)
         .arg(k1)
         .arg(k2)
@@ -144,7 +147,7 @@ fn main() -> ocl::Result<()> {
     macro_rules! kernel_enq (
         ($num:expr) => (
         for i in 0..$num {
-            offset = i * global_work_size;
+            offset = i * GLOBAL_WORK_SIZE;
             unsafe {
                 kernel
                     .set_default_global_work_offset(SpatialDims::One(offset))
@@ -176,7 +179,7 @@ fn main() -> ocl::Result<()> {
         result.map().enq()?;
         //result.read(&mut res_buf).enq()?;
     }
-    pro_que.finish()?;
+    qu.finish()?;
     let m2 = SystemTime::now();
     println!("Trimming {:?}", m2.duration_since(m1).unwrap());
     println!("Trimmed to {} edges", res_buf[1]);

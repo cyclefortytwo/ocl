@@ -1,3 +1,4 @@
+
 typedef uint8 u8;
 typedef uint16 u16;
 typedef uint u32;
@@ -5,7 +6,7 @@ typedef ulong u64;
 typedef u32 node_t;
 typedef u64 nonce_t;
 
-#define DEBUG 1
+#define DEBUG 0
 
 // this define should be set from host code to be completely universal
 #define EDGEBITS 29
@@ -44,12 +45,14 @@ u64 dipnode(ulong v0i, ulong v1i, ulong v2i, ulong v3i, u64 nce, uint uorv) {
 // 1024 thread blocks, 256 threads each, 256 edges for each thread
 // 8*1024*256*256 = 536 870 912 edges = cuckatoo29
 __attribute__((reqd_work_group_size(256, 1, 1)))
-__kernel  void LeanRound(const u64 v0i, const u64 v1i, const u64 v2i, const u64 v3i, __global uint8 * edges, __global uint * counters, __global int * aux, const int mode, const uint uorv)
+__kernel  void LeanRound(const u64 v0i, const u64 v1i, const u64 v2i, const u64 v3i, __global uint8 * edges, __global uint * counters, __global u32 * aux, const u32 mode, const u32 uorv)
 {
 	const int blocks = NEDGES / 32;
 	const int gid = get_global_id(0);
+	const int lid = get_local_id(0);
+
 	{
-		u32 el[8];
+		__local u32 el[256][8];
 		int lCount = 0;
 		// what 256 nit block of edges are we processing
 		u64 index = gid;
@@ -57,20 +60,20 @@ __kernel  void LeanRound(const u64 v0i, const u64 v1i, const u64 v2i, const u64 
 		// load all 256 bits (edges) to registers
 		uint8 load = edges[index];
 		// map to an array for easier indexing (depends on compiler/GPU, could be pushed out to cache)
-		el[0] = load.s0;
-		el[1] = load.s1;
-		el[2] = load.s2;
-		el[3] = load.s3;
-		el[4] = load.s4;
-		el[5] = load.s5;
-		el[6] = load.s6;
-		el[7] = load.s7;
+		el[lid][0] = load.s0;
+		el[lid][1] = load.s1;
+		el[lid][2] = load.s2;
+		el[lid][3] = load.s3;
+		el[lid][4] = load.s4;
+		el[lid][5] = load.s5;
+		el[lid][6] = load.s6;
+		el[lid][7] = load.s7;
 		
 		// process as 8 x 32bit segment, GPUs have 32bit ALUs 
 		for (short i = 0; i < 8; i++)
 		{
 			// shortcut to current 32bit value
-			uint ee = el[i];
+			uint ee = el[lid][i];
 			// how many edges we process in the block
 			short lEdges = popcount(ee);
 			// whole warp will always execute worst case scenario, but it will help in the long run (not benched)
@@ -115,7 +118,7 @@ __kernel  void LeanRound(const u64 v0i, const u64 v1i, const u64 v2i, const u64 
 					// if edge is not alive, kill it (locally in registers)
 					if (!lives)
 					{
-						el[i] ^= ((u32)1<<31) >> pos; // 1 XOR 1 is 0
+						el[lid][i] ^= ((u32)1<<31) >> pos; // 1 XOR 1 is 0
 					}
 					else
 					{
@@ -148,7 +151,7 @@ __kernel  void LeanRound(const u64 v0i, const u64 v1i, const u64 v2i, const u64 
 		}
 		// return edge bits back to global memory if we are in second stage
 		if (mode == MODE_TRIM)
-			edges[index] = (uint8)(el[0], el[1], el[2], el[3], el[4], el[5], el[6], el[7]);
+			edges[index] = (uint8)(el[lid][0], el[lid][1], el[lid][2], el[lid][3], el[lid][4], el[lid][5], el[lid][6], el[lid][7]);
 		// debug only, use aux buffer to count alive edges in this round
 		if (DEBUG)
 			atomic_add(aux, lCount);
