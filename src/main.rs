@@ -15,7 +15,7 @@ const RES_BUFFER_SIZE: usize = 4_000_000;
 const LOCAL_WORK_SIZE: usize = 256;
 const GLOBAL_WORK_SIZE: usize = 1024 * LOCAL_WORK_SIZE;
 
-const TRIMS: u32 = 128;
+const TRIMS: u32 = 256;
 
 fn find_paltform(selector: Option<&String>) -> Option<Platform> {
     match selector {
@@ -63,9 +63,9 @@ fn main() -> ocl::Result<()> {
     let device = find_device(&platform, device_selector)?;
     println!("Device selected: {}", device.to_string());
 
-    let _edge_bits = 29;
-    let edge_count = 1024 * 1024 * 512 / 32;
-    let node_count = 1024 * 1024 * 512 / 32;
+    let _edge_bits = 31;
+    let edge_count = 1024 * 1024 * 64;
+    let node_count = 1024 * 1024 * 64;
     let res_buf: Vec<u32> = vec![0; RES_BUFFER_SIZE];
 
     let m1 = SystemTime::now();
@@ -114,10 +114,17 @@ fn main() -> ocl::Result<()> {
     //let k2: u64 = 0x7282d7893f658b88;
     //let k3: u64 = 0x61525294db9b617f;
 
-    let k0: u64 = 0x27580576fe290177;
-    let k1: u64 = 0xf9ea9b2031f4e76e;
-    let k2: u64 = 0x1663308c8607868f;
-    let k3: u64 = 0xb88839b0fa180d0e;
+    //let k0: u64 = 0x27580576fe290177;
+    //let k1: u64 = 0xf9ea9b2031f4e76e;
+    //let k2: u64 = 0x1663308c8607868f;
+    //let k3: u64 = 0xb88839b0fa180d0e;
+	
+	// cuckatoo31
+	//8785f61f3e087286 91b57e6072a0cdaa 8035f9ee251a77a0 de03da786148f07
+	let k0: u64 = 0x8785f61f3e087286;
+    let k1: u64 = 0x91b57e6072a0cdaa;
+    let k2: u64 = 0x8035f9ee251a77a0;
+    let k3: u64 = 0xde03da786148f07;
 
     let mut current_mode = Mode::SetCnt;
     let mut current_uorv: u32 = 0;
@@ -161,7 +168,7 @@ fn main() -> ocl::Result<()> {
         current_mode = Mode::SetCnt;
         kernel.set_arg(7, current_mode as u32)?;
         kernel.set_arg(8, current_uorv)?;
-        kernel_enq!(8);
+        kernel_enq!(32);
 
         current_mode = if l == (TRIMS - 1) {
             Mode::Extract
@@ -169,7 +176,7 @@ fn main() -> ocl::Result<()> {
             Mode::Trim
         };
         kernel.set_arg(7, current_mode as u32)?;
-        kernel_enq!(8);
+        kernel_enq!(32);
         // prepare for the next round
         if l != TRIMS - 1 {
             counters.cmd().fill(0, None).enq()?;
