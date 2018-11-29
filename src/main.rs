@@ -1,6 +1,7 @@
-extern crate int_hash;
+extern crate hashbrown;
 extern crate ocl;
 
+use hashbrown::HashMap;
 use ocl::flags::CommandQueueProperties;
 use ocl::{Buffer, Context, Device, Kernel, Platform, Program, Queue, SpatialDims};
 use std::env;
@@ -198,11 +199,12 @@ fn main() -> ocl::Result<()> {
     let _cycle = g.find()?;
     let m6 = SystemTime::now();
     println!("Searching graph {:?}", m6.duration_since(m5).unwrap());
+    println!(
+        "Total time in cycle finder {:?}",
+        m6.duration_since(m3).unwrap()
+    );
     Ok(())
 }
-
-//use fnv::IntHashMap;
-use int_hash::IntHashMap;
 
 struct Solution {
     nonces: Vec<u32>,
@@ -213,7 +215,7 @@ struct Search {
     path: Vec<u32>,
     solutions: Vec<Solution>,
 
-    state: IntHashMap<u32, NodeState>,
+    state: HashMap<u32, NodeState>,
     node_visited: usize,
     node_explored: usize,
 }
@@ -231,7 +233,7 @@ impl Search {
             path: Vec::with_capacity(node_count),
             solutions: vec![],
             length: length * 2,
-            state: IntHashMap::with_capacity_and_hasher(node_count, Default::default()),
+            state: HashMap::with_capacity_and_hasher(node_count, Default::default()),
             node_visited: 0,
             node_explored: 0,
         }
@@ -286,7 +288,7 @@ impl Search {
         //self.state.clear();
     }
 
-    fn is_cycle(&mut self, node: u32) -> bool {
+    fn is_cycle(&mut self, node: u32, is_first: bool) -> bool {
         //  TODO remove after tests
         if self.path.contains(&node) {
             let pos = self.path.iter().position(|&v| v == node).unwrap();
@@ -297,7 +299,7 @@ impl Search {
         }
         let res =
             self.path.len() > self.length - 1 && self.path[self.path.len() - self.length] == node;
-        if res {
+        if res && !is_first {
             self.path.push(node);
         }
         res
@@ -363,17 +365,17 @@ fn nonce_key(node1: u32, node2: u32) -> (u32, u32) {
 }
 
 struct Graph {
-    adj_index: IntHashMap<u32, usize>,
+    adj_index: HashMap<u32, usize>,
     adj_store: Vec<AdjNode>,
-    nonces: IntHashMap<(u32, u32), u32>,
+    nonces: HashMap<(u32, u32), u32>,
 }
 
 impl Graph {
     pub fn build(edges: &[u32]) -> Graph {
         let edge_count = edges[1] as usize;
         let mut g = Graph {
-            adj_index: IntHashMap::with_capacity_and_hasher(edge_count * 2, Default::default()),
-            nonces: IntHashMap::with_capacity_and_hasher(edge_count, Default::default()),
+            adj_index: HashMap::with_capacity_and_hasher(edge_count * 2, Default::default()),
+            nonces: HashMap::with_capacity_and_hasher(edge_count, Default::default()),
             adj_store: Vec::with_capacity(edge_count * 2),
         };
         const STEP: usize = 4;
@@ -413,7 +415,6 @@ impl Graph {
     fn add_half_edge(&mut self, from: u32, to: u32) {
         if let Some(index) = self.adj_index.get(&from) {
             self.adj_store.push(AdjNode::next(to, *index));
-        //*index = self.adj_store.len() - 1;
         } else {
             self.adj_store.push(AdjNode::first(to));
         }
@@ -453,8 +454,7 @@ impl Graph {
             .map(|pair| match pair {
                 &[n1, n2] => self.get_nonce(n1, n2),
                 _ => Err("not an edge".to_string()),
-            })
-            .collect();
+            }).collect();
         let mut nonces = match res {
             Ok(v) => v,
             Err(e) => {
@@ -469,9 +469,8 @@ impl Graph {
 
     fn walk_graph(&self, current: u32, search: &mut Search) -> Result<(), String> {
         if search.is_explored(current) {
-            if search.is_cycle(current) {
+            if search.is_cycle(current, true) {
                 self.add_solution(search)?;
-                println!("Found {}", current);
             }
             return Ok(());
         }
@@ -484,11 +483,10 @@ impl Graph {
         for ns in neighbors {
             if !search.is_visited(ns) {
                 search.visit(ns);
-                //search.visit_edge();
                 self.walk_graph(ns ^ 1, search)?;
                 search.leave();
             } else {
-                if search.is_cycle(ns) {
+                if search.is_cycle(ns, false) {
                     self.add_solution(search)?;
                 }
             }
